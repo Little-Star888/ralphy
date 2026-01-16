@@ -67,9 +67,7 @@ iteration=0
 retry_count=0
 declare -a parallel_pids=()
 declare -a task_branches=()
-declare -a parallel_task_names=()
-declare -a parallel_task_status=()
-declare -a parallel_task_tmpfiles=()
+WORKTREE_BASE=""  # Base directory for parallel agent worktrees
 
 # ============================================
 # UTILITY FUNCTIONS
@@ -385,6 +383,15 @@ cleanup() {
   
   # Remove temp file
   [[ -n "$tmpfile" ]] && rm -f "$tmpfile"
+  
+  # Cleanup parallel worktrees
+  if [[ -n "$WORKTREE_BASE" ]] && [[ -d "$WORKTREE_BASE" ]]; then
+    # Remove all worktrees we created
+    for dir in "$WORKTREE_BASE"/agent-*; do
+      [[ -d "$dir" ]] && git worktree remove -f "$dir" 2>/dev/null || true
+    done
+    rm -rf "$WORKTREE_BASE" 2>/dev/null || true
+  fi
   
   # Show message on interrupt
   if [[ $exit_code -eq 130 ]]; then
@@ -1102,43 +1109,103 @@ run_single_task() {
 # PARALLEL TASK EXECUTION
 # ============================================
 
-# Run a single task silently for parallel mode (output to file)
-run_parallel_task() {
+# Create an isolated worktree for a parallel agent
+create_agent_worktree() {
   local task_name="$1"
-  local task_num="$2"
+  local agent_num="$2"
+  local branch_name="ralphy/agent-${agent_num}-$(slugify "$task_name")"
+  local worktree_dir="${WORKTREE_BASE}/agent-${agent_num}"
+  
+  # Create branch from base
+  git branch -f "$branch_name" "$BASE_BRANCH" 2>/dev/null || true
+  
+  # Create worktree
+  rm -rf "$worktree_dir" 2>/dev/null || true
+  git worktree add -f "$worktree_dir" "$branch_name" 2>/dev/null
+  
+  echo "$worktree_dir|$branch_name"
+}
+
+# Cleanup worktree after agent completes
+cleanup_agent_worktree() {
+  local worktree_dir="$1"
+  local branch_name="$2"
+  
+  git worktree remove -f "$worktree_dir" 2>/dev/null || true
+  # Don't delete branch - it may have commits we want to keep/PR
+}
+
+# Run a single agent in its own isolated worktree
+run_parallel_agent() {
+  local task_name="$1"
+  local agent_num="$2"
   local output_file="$3"
   local status_file="$4"
+  local log_file="$5"
+  
+  echo "setting up" > "$status_file"
+  
+  # Create isolated worktree for this agent
+  local worktree_info
+  worktree_info=$(create_agent_worktree "$task_name" "$agent_num" 2>>"$log_file")
+  local worktree_dir="${worktree_info%%|*}"
+  local branch_name="${worktree_info##*|}"
+  
+  if [[ ! -d "$worktree_dir" ]]; then
+    echo "failed" > "$status_file"
+    echo "Failed to create worktree" >> "$log_file"
+    echo "0 0" > "$output_file"
+    return 1
+  fi
   
   echo "running" > "$status_file"
   
-  # Create branch if needed
-  local branch_name=""
-  if [[ "$BRANCH_PER_TASK" == true ]]; then
-    branch_name=$(create_task_branch "$task_name" 2>/dev/null)
+  # Copy PRD file to worktree if it's not tracked by git
+  if [[ "$PRD_SOURCE" == "markdown" ]] || [[ "$PRD_SOURCE" == "yaml" ]]; then
+    cp "$PRD_FILE" "$worktree_dir/" 2>/dev/null || true
   fi
   
+  # Ensure progress.txt exists in worktree
+  touch "$worktree_dir/progress.txt"
+  
+  # Build prompt for this specific task
+  local prompt="You are working on a specific task. Focus ONLY on this task:
+
+TASK: $task_name
+
+Instructions:
+1. Implement this specific task completely
+2. Write tests if appropriate
+3. Update progress.txt with what you did
+4. Commit your changes with a descriptive message
+
+Do NOT modify PRD.md or mark tasks complete - that will be handled separately.
+Focus only on implementing: $task_name"
+
   # Temp file for AI output
   local tmpfile
   tmpfile=$(mktemp)
   
-  # Build the prompt
-  local prompt
-  prompt=$(build_prompt "$task_name")
-  
-  # Run AI command
+  # Run AI agent in the worktree directory
   local result=""
   local success=false
   local retry=0
   
   while [[ $retry -lt $MAX_RETRIES ]]; do
     if [[ "$USE_OPENCODE" == true ]]; then
-      OPENCODE_PERMISSION='{"*":"allow"}' opencode run \
-        --format json \
-        "$prompt" > "$tmpfile" 2>&1
+      (
+        cd "$worktree_dir"
+        OPENCODE_PERMISSION='{"*":"allow"}' opencode run \
+          --format json \
+          "$prompt"
+      ) > "$tmpfile" 2>>"$log_file"
     else
-      claude --dangerously-skip-permissions \
-        -p "$prompt" \
-        --output-format stream-json > "$tmpfile" 2>&1
+      (
+        cd "$worktree_dir"
+        claude --dangerously-skip-permissions \
+          -p "$prompt" \
+          --output-format stream-json
+      ) > "$tmpfile" 2>>"$log_file"
     fi
     
     result=$(cat "$tmpfile" 2>/dev/null || echo "")
@@ -1149,6 +1216,7 @@ run_parallel_task() {
     fi
     
     ((retry++))
+    echo "Retry $retry/$MAX_RETRIES after empty response" >> "$log_file"
     sleep "$RETRY_DELAY"
   done
   
@@ -1165,70 +1233,38 @@ run_parallel_task() {
     [[ "$input_tokens" =~ ^[0-9]+$ ]] || input_tokens=0
     [[ "$output_tokens" =~ ^[0-9]+$ ]] || output_tokens=0
     
-    # Mark task complete for GitHub issues
-    if [[ "$PRD_SOURCE" == "github" ]]; then
-      mark_task_complete "$task_name"
-    fi
-    
     # Create PR if requested
-    if [[ "$CREATE_PR" == true ]] && [[ -n "$branch_name" ]]; then
-      create_pull_request "$branch_name" "$task_name" "Automated implementation by Ralphy" 2>/dev/null || true
+    if [[ "$CREATE_PR" == true ]]; then
+      (
+        cd "$worktree_dir"
+        git push -u origin "$branch_name" 2>>"$log_file" || true
+        gh pr create \
+          --base "$BASE_BRANCH" \
+          --head "$branch_name" \
+          --title "$task_name" \
+          --body "Automated implementation by Ralphy (Agent $agent_num)" \
+          ${PR_DRAFT:+--draft} 2>>"$log_file" || true
+      )
     fi
-    
-    # Return to base branch
-    return_to_base_branch 2>/dev/null || true
     
     # Write success output
     echo "done" > "$status_file"
-    echo "$input_tokens $output_tokens" >> "$output_file"
+    echo "$input_tokens $output_tokens $branch_name" > "$output_file"
+    
+    # Cleanup worktree (but keep branch)
+    cleanup_agent_worktree "$worktree_dir" "$branch_name"
+    
     return 0
   else
     echo "failed" > "$status_file"
-    echo "0 0" >> "$output_file"
-    return_to_base_branch 2>/dev/null || true
+    echo "0 0" > "$output_file"
+    cleanup_agent_worktree "$worktree_dir" "$branch_name"
     return 1
   fi
 }
 
-# Display parallel task status
-display_parallel_status() {
-  local -n task_names=$1
-  local -n status_files=$2
-  local num_tasks=${#task_names[@]}
-  
-  # Move cursor up and clear lines
-  for ((i = 0; i < num_tasks; i++)); do
-    local task="${task_names[$i]}"
-    local status_file="${status_files[$i]}"
-    local status="waiting"
-    [[ -f "$status_file" ]] && status=$(cat "$status_file" 2>/dev/null || echo "waiting")
-    
-    local icon color
-    case "$status" in
-      running)
-        icon="◐"
-        color="$YELLOW"
-        ;;
-      done)
-        icon="✓"
-        color="$GREEN"
-        ;;
-      failed)
-        icon="✗"
-        color="$RED"
-        ;;
-      *)
-        icon="○"
-        color="$DIM"
-        ;;
-    esac
-    
-    printf "  ${color}%s${RESET} Task %d: %s\n" "$icon" "$((i + 1))" "${task:0:50}"
-  done
-}
-
 run_parallel_tasks() {
-  log_info "Running tasks in parallel (max: $MAX_PARALLEL)..."
+  log_info "Running ${BOLD}$MAX_PARALLEL parallel agents${RESET} (each in isolated worktree)..."
   
   local tasks=()
   
@@ -1245,9 +1281,20 @@ run_parallel_tasks() {
   local total_tasks=${#tasks[@]}
   log_info "Found $total_tasks tasks to process"
   
+  # Set up worktree base directory
+  WORKTREE_BASE=$(mktemp -d)
+  log_debug "Worktree base: $WORKTREE_BASE"
+  
+  # Ensure we have a base branch set
+  if [[ -z "$BASE_BRANCH" ]]; then
+    BASE_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+  fi
+  log_info "Base branch: $BASE_BRANCH"
+  
   # Process tasks in batches
   local batch_start=0
   local batch_num=0
+  local completed_branches=()
   
   while [[ $batch_start -lt $total_tasks ]]; do
     ((batch_num++))
@@ -1256,9 +1303,10 @@ run_parallel_tasks() {
     local batch_size=$((batch_end - batch_start))
     
     echo ""
-    echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo "${BOLD}Batch $batch_num: Running $batch_size task(s) in parallel${RESET}"
-    echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo "${BOLD}Batch $batch_num: Spawning $batch_size parallel agents${RESET}"
+    echo "${DIM}Each agent runs in its own git worktree with isolated workspace${RESET}"
+    echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
     
     # Setup arrays for this batch
@@ -1266,27 +1314,31 @@ run_parallel_tasks() {
     local batch_tasks=()
     local status_files=()
     local output_files=()
+    local log_files=()
     
-    # Start all tasks in the batch
+    # Start all agents in the batch
     for ((i = batch_start; i < batch_end; i++)); do
       local task="${tasks[$i]}"
+      local agent_num=$((i + 1))
       ((iteration++))
       
       local status_file=$(mktemp)
       local output_file=$(mktemp)
+      local log_file=$(mktemp)
       
       batch_tasks+=("$task")
       status_files+=("$status_file")
       output_files+=("$output_file")
+      log_files+=("$log_file")
       
       echo "waiting" > "$status_file"
       
       # Show initial status
-      printf "  ${DIM}○${RESET} Task %d: %s\n" "$((i - batch_start + 1))" "${task:0:50}"
+      printf "  ${CYAN}◉${RESET} Agent %d: %s\n" "$agent_num" "${task:0:50}"
       
-      # Run in background
+      # Run agent in background
       (
-        run_parallel_task "$task" "$iteration" "$output_file" "$status_file"
+        run_parallel_agent "$task" "$agent_num" "$output_file" "$status_file" "$log_file"
       ) &
       parallel_pids+=($!)
     done
@@ -1301,6 +1353,7 @@ run_parallel_tasks() {
     while true; do
       # Check if all processes are done
       local all_done=true
+      local setting_up=0
       local running=0
       local done_count=0
       local failed_count=0
@@ -1311,6 +1364,10 @@ run_parallel_tasks() {
         local status=$(cat "$status_file" 2>/dev/null || echo "waiting")
         
         case "$status" in
+          "setting up")
+            all_done=false
+            ((setting_up++))
+            ;;
           running)
             all_done=false
             ((running++))
@@ -1337,14 +1394,14 @@ run_parallel_tasks() {
       local spin_char="${spinner_chars:$spin_idx:1}"
       spin_idx=$(( (spin_idx + 1) % ${#spinner_chars} ))
       
-      printf "\r  ${CYAN}%s${RESET} Running: ${YELLOW}%d${RESET} | Done: ${GREEN}%d${RESET} | Failed: ${RED}%d${RESET} | Elapsed: %02d:%02d " \
-        "$spin_char" "$running" "$done_count" "$failed_count" $((elapsed / 60)) $((elapsed % 60))
+      printf "\r  ${CYAN}%s${RESET} Agents: ${BLUE}%d setup${RESET} | ${YELLOW}%d running${RESET} | ${GREEN}%d done${RESET} | ${RED}%d failed${RESET} | %02d:%02d " \
+        "$spin_char" "$setting_up" "$running" "$done_count" "$failed_count" $((elapsed / 60)) $((elapsed % 60))
       
-      sleep 0.2
+      sleep 0.3
     done
     
     # Clear the spinner line
-    printf "\r%80s\r" ""
+    printf "\r%100s\r" ""
     
     # Wait for all processes to fully complete
     for pid in "${parallel_pids[@]}"; do
@@ -1352,30 +1409,50 @@ run_parallel_tasks() {
     done
     
     # Show final status for this batch
+    echo ""
     echo "${BOLD}Batch $batch_num Results:${RESET}"
     for ((j = 0; j < batch_size; j++)); do
       local task="${batch_tasks[$j]}"
       local status_file="${status_files[$j]}"
       local output_file="${output_files[$j]}"
+      local log_file="${log_files[$j]}"
       local status=$(cat "$status_file" 2>/dev/null || echo "unknown")
+      local agent_num=$((batch_start + j + 1))
       
-      local icon color
+      local icon color branch_info=""
       case "$status" in
         done)
           icon="✓"
           color="$GREEN"
-          # Collect tokens
-          local tokens=$(cat "$output_file" 2>/dev/null || echo "0 0")
-          local in_tok=$(echo "$tokens" | awk '{print $1}')
-          local out_tok=$(echo "$tokens" | awk '{print $2}')
+          # Collect tokens and branch name
+          local output_data=$(cat "$output_file" 2>/dev/null || echo "0 0")
+          local in_tok=$(echo "$output_data" | awk '{print $1}')
+          local out_tok=$(echo "$output_data" | awk '{print $2}')
+          local branch=$(echo "$output_data" | awk '{print $3}')
           [[ "$in_tok" =~ ^[0-9]+$ ]] || in_tok=0
           [[ "$out_tok" =~ ^[0-9]+$ ]] || out_tok=0
           total_input_tokens=$((total_input_tokens + in_tok))
           total_output_tokens=$((total_output_tokens + out_tok))
+          if [[ -n "$branch" ]]; then
+            completed_branches+=("$branch")
+            branch_info=" → ${CYAN}$branch${RESET}"
+          fi
+          
+          # Mark task complete in PRD
+          if [[ "$PRD_SOURCE" == "markdown" ]]; then
+            mark_task_complete_markdown "$task"
+          elif [[ "$PRD_SOURCE" == "yaml" ]]; then
+            mark_task_complete_yaml "$task"
+          elif [[ "$PRD_SOURCE" == "github" ]]; then
+            mark_task_complete_github "$task"
+          fi
           ;;
         failed)
           icon="✗"
           color="$RED"
+          if [[ -s "$log_file" ]]; then
+            branch_info=" ${DIM}(see log)${RESET}"
+          fi
           ;;
         *)
           icon="?"
@@ -1383,10 +1460,10 @@ run_parallel_tasks() {
           ;;
       esac
       
-      printf "  ${color}%s${RESET} %s\n" "$icon" "${task:0:60}"
+      printf "  ${color}%s${RESET} Agent %d: %s%s\n" "$icon" "$agent_num" "${task:0:45}" "$branch_info"
       
       # Cleanup temp files
-      rm -f "$status_file" "$output_file"
+      rm -f "$status_file" "$output_file" "$log_file"
     done
     
     batch_start=$batch_end
@@ -1394,9 +1471,26 @@ run_parallel_tasks() {
     # Check if we've hit max iterations
     if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $iteration -ge $MAX_ITERATIONS ]]; then
       log_warn "Reached max iterations ($MAX_ITERATIONS)"
-      return 0
+      break
     fi
   done
+  
+  # Cleanup worktree base
+  rm -rf "$WORKTREE_BASE" 2>/dev/null || true
+  
+  # Show branches created
+  if [[ ${#completed_branches[@]} -gt 0 ]]; then
+    echo ""
+    echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo "${BOLD}Branches created by agents:${RESET}"
+    for branch in "${completed_branches[@]}"; do
+      echo "  ${CYAN}•${RESET} $branch"
+    done
+    if [[ "$CREATE_PR" != true ]]; then
+      echo ""
+      echo "${DIM}Tip: Use --create-pr to automatically create PRs for each branch${RESET}"
+    fi
+  fi
   
   return 0
 }

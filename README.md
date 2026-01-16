@@ -106,17 +106,38 @@ Uses open issues from the specified repository. Issues are closed automatically 
 
 ## Parallel Execution
 
-Run multiple independent tasks concurrently:
+Spin up multiple AI agents simultaneously, each working in its own isolated git worktree:
 
 ```bash
-# Run up to 3 tasks in parallel (default)
+# Run up to 3 agents in parallel (default)
 ./ralphy.sh --parallel
 
-# Run up to 5 tasks in parallel
+# Run up to 5 agents in parallel
 ./ralphy.sh --parallel --max-parallel 5
+
+# Parallel with automatic PR creation
+./ralphy.sh --parallel --create-pr
 ```
 
-When using YAML format, you can group tasks that can run together:
+### How Parallel Mode Works
+
+1. **Isolated Worktrees** - Each agent gets its own git worktree (separate directory)
+2. **Separate Branches** - Each agent works on its own branch (`ralphy/agent-N-task-name`)
+3. **No Conflicts** - Agents can't interfere with each other's work
+4. **Batched Execution** - Tasks run in batches of `--max-parallel` size
+
+```
+Batch 1: Agent 1 ─┬─► Branch: ralphy/agent-1-create-user-model
+         Agent 2 ─┼─► Branch: ralphy/agent-2-create-post-model  
+         Agent 3 ─┘─► Branch: ralphy/agent-3-add-api-endpoints
+
+Batch 2: Agent 4 ───► Branch: ralphy/agent-4-add-authentication
+         Agent 5 ───► Branch: ralphy/agent-5-add-dashboard
+```
+
+### YAML Parallel Groups (optional)
+
+Control which tasks can run together:
 
 ```yaml
 tasks:

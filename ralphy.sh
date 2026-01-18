@@ -406,7 +406,7 @@ check_requirements() {
 
   # Check for jq (required for JSON parsing)
   if ! command -v jq &>/dev/null; then
-    log_error "jq is required but not installed. Install with: apt-get install jq (Debian/Ubuntu) or yum install jq (RHEL/CentOS)"
+    log_error "jq is required but not installed. On Linux, install with: apt-get install jq (Debian/Ubuntu) or yum install jq (RHEL/CentOS)"
     exit 1
   fi
 

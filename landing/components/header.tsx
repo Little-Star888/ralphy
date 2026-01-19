@@ -1,52 +1,47 @@
-"use client";
-
-import { Github, Package } from "lucide-react";
 import Link from "next/link";
 
 export function Header() {
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-zinc-200 bg-white/80 backdrop-blur-sm">
-      <div className="mx-auto flex h-14 max-w-4xl items-center justify-between px-6">
-        <Link href="/" className="flex items-center gap-2">
-          <span className="text-xl">🐕</span>
-          <span className="font-semibold">ralphy</span>
+    <header className="py-4 px-4">
+      <div className="mx-auto max-w-xl flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-2 text-neutral-800">
+          <img
+            src="/logo.png"
+            alt="Ralphy"
+            width={32}
+            height={32}
+            className="rounded"
+          />
+          <span className="font-medium">ralphy</span>
         </Link>
 
-        <nav className="flex items-center gap-6">
-          <Link
-            href="#features"
-            className="text-sm text-zinc-600 hover:text-zinc-900 transition-colors"
-          >
-            features
-          </Link>
+        <nav className="flex items-center gap-4 text-sm">
           <Link
             href="#engines"
-            className="text-sm text-zinc-600 hover:text-zinc-900 transition-colors"
+            className="text-neutral-500 hover:text-neutral-800 underline"
           >
             engines
           </Link>
           <Link
-            href="#quickstart"
-            className="text-sm text-zinc-600 hover:text-zinc-900 transition-colors"
+            href="#usage"
+            className="text-neutral-500 hover:text-neutral-800 underline"
           >
-            quickstart
+            usage
           </Link>
-          <div className="flex items-center gap-3 ml-2">
-            <Link
-              href="https://github.com/michaelshimeles/ralphy"
-              target="_blank"
-              className="text-zinc-600 hover:text-zinc-900 transition-colors"
-            >
-              <Github className="h-5 w-5" />
-            </Link>
-            <Link
-              href="https://www.npmjs.com/package/ralphy-cli"
-              target="_blank"
-              className="text-zinc-600 hover:text-zinc-900 transition-colors"
-            >
-              <Package className="h-5 w-5" />
-            </Link>
-          </div>
+          <Link
+            href="https://github.com/michaelshimeles/ralphy"
+            target="_blank"
+            className="text-neutral-500 hover:text-neutral-800 underline"
+          >
+            github
+          </Link>
+          <Link
+            href="https://www.npmjs.com/package/ralphy-cli"
+            target="_blank"
+            className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700"
+          >
+            install
+          </Link>
         </nav>
       </div>
     </header>

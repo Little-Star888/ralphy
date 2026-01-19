@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, ChevronRight } from "lucide-react";
 
 export function Hero() {
   const [copied, setCopied] = useState(false);
@@ -14,49 +14,51 @@ export function Hero() {
   };
 
   return (
-    <section className="py-24 px-6">
-      <div className="mx-auto max-w-4xl">
-        <div className="mb-6">
-          <span className="inline-flex items-center rounded-full bg-zinc-100 px-3 py-1 text-sm text-zinc-700">
-            v4.1.0 — Now available on npm
-          </span>
+    <section className="px-4 pt-12 pb-8">
+      <div className="mx-auto max-w-xl">
+        <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-sm text-neutral-600">
+          <span>v4.1.0 available on npm</span>
+          <ChevronRight className="h-3 w-3" />
         </div>
 
-        <h1 className="text-4xl font-bold tracking-tight sm:text-5xl mb-6">
-          Autonomous AI Coding Loop
+        <h1 className="text-2xl leading-tight mb-4">
+          The Autonomous AI Coding Loop
         </h1>
 
-        <p className="text-xl text-zinc-600 mb-4 max-w-2xl">
+        <p className="text-neutral-600 mb-3">
           Run AI agents on your tasks until done. Give it a PRD, a task list, or
-          just tell it what to build. Ralphy handles the rest.
+          GitHub issues. Ralphy works through them one by one—or in parallel
+          using git worktrees.
         </p>
 
-        <p className="text-lg text-zinc-500 mb-8 max-w-2xl">
+        <p className="text-neutral-500 mb-6">
           Supports Claude Code, OpenCode, Codex, Cursor, Qwen-Code, and Factory
-          Droid. Run sequentially or in parallel with git worktrees.
+          Droid. Configure project rules so the AI follows your conventions.
         </p>
 
         <button
           onClick={copyToClipboard}
-          className="group flex w-full max-w-md items-center justify-between rounded-lg bg-zinc-900 px-4 py-3 text-white hover:bg-zinc-800 transition-colors"
+          className="group flex w-full items-center justify-between rounded-md bg-blue-600 px-4 py-2.5 text-white hover:bg-blue-700 transition-colors"
         >
-          <code className="text-sm font-mono">{installCommand}</code>
+          <span className="flex items-center gap-2">
+            <code className="text-sm">{installCommand}</code>
+          </span>
           {copied ? (
-            <Check className="h-4 w-4 text-green-400" />
+            <Check className="h-4 w-4" />
           ) : (
-            <Copy className="h-4 w-4 opacity-50 group-hover:opacity-100 transition-opacity" />
+            <Copy className="h-4 w-4 opacity-70 group-hover:opacity-100" />
           )}
         </button>
 
-        <p className="mt-3 text-sm text-zinc-500">
-          Or clone from{" "}
+        <p className="mt-2 text-xs text-neutral-400">
+          *Or clone from{" "}
           <a
             href="https://github.com/michaelshimeles/ralphy"
-            className="underline hover:text-zinc-700"
+            className="underline hover:text-neutral-600"
           >
             GitHub
           </a>{" "}
-          to use the bash script directly.
+          to use the bash script.
         </p>
       </div>
     </section>

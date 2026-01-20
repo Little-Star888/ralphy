@@ -5,15 +5,23 @@ import type { Task, TaskSource } from "../tasks/types.ts";
 import { YamlTaskSource } from "../tasks/yaml.ts";
 import { PROGRESS_FILE, RALPHY_DIR } from "../config/loader.ts";
 import { logTaskProgress } from "../config/writer.ts";
-import { logDebug, logError, logInfo, logSuccess } from "../ui/logger.ts";
+import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { notifyTaskComplete, notifyTaskFailed } from "../ui/notify.ts";
 import {
 	cleanupAgentWorktree,
 	createAgentWorktree,
 	getWorktreeBase,
 } from "../git/worktree.ts";
+import {
+	mergeAgentBranch,
+	abortMerge,
+	deleteLocalBranch,
+	createIntegrationBranch,
+} from "../git/merge.ts";
+import { getCurrentBranch } from "../git/branch.ts";
 import { buildParallelPrompt } from "./prompt.ts";
 import { isRetryableError, sleep, withRetry } from "./retry.ts";
+import { resolveConflictsWithAI } from "./conflict-resolution.ts";
 import type { ExecutionOptions, ExecutionResult } from "./sequential.ts";
 
 interface ParallelAgentResult {
@@ -40,7 +48,8 @@ async function runAgentInWorktree(
 	retryDelay: number,
 	skipTests: boolean,
 	skipLint: boolean,
-	browserEnabled: "auto" | "true" | "false"
+	browserEnabled: "auto" | "true" | "false",
+	modelOverride?: string
 ): Promise<ParallelAgentResult> {
 	let worktreeDir = "";
 	let branchName = "";
@@ -84,9 +93,10 @@ async function runAgentInWorktree(
 		});
 
 		// Execute with retry
+		const engineOptions = modelOverride ? { modelOverride } : undefined;
 		const result = await withRetry(
 			async () => {
-				const res = await engine.execute(prompt, worktreeDir);
+				const res = await engine.execute(prompt, worktreeDir, engineOptions);
 				if (!res.success && res.error && isRetryableError(res.error)) {
 					throw new Error(res.error);
 				}
@@ -123,6 +133,8 @@ export async function runParallel(
 		prdSource,
 		prdFile,
 		browserEnabled,
+		modelOverride,
+		skipMerge,
 	} = options;
 
 	const result: ExecutionResult = {
@@ -135,6 +147,12 @@ export async function runParallel(
 	// Get worktree base directory
 	const worktreeBase = getWorktreeBase(workDir);
 	logDebug(`Worktree base: ${worktreeBase}`);
+
+	// Save original base branch for merge phase
+	const originalBaseBranch = baseBranch || (await getCurrentBranch(workDir));
+
+	// Track completed branches for merge phase
+	const completedBranches: string[] = [];
 
 	// Process tasks in batches
 	let iteration = 0;
@@ -196,7 +214,8 @@ export async function runParallel(
 				retryDelay,
 				skipTests,
 				skipLint,
-				browserEnabled
+				browserEnabled,
+				modelOverride
 			)
 		);
 
@@ -220,6 +239,11 @@ export async function runParallel(
 				logTaskProgress(task.title, "completed", workDir);
 				result.tasksCompleted++;
 				notifyTaskComplete(task.title);
+
+				// Track successful branch for merge phase
+				if (branchName) {
+					completedBranches.push(branchName);
+				}
 			} else {
 				const errMsg = aiResult?.error || "Unknown error";
 				logError(`Task "${task.title}" failed: ${errMsg}`);
@@ -238,5 +262,87 @@ export async function runParallel(
 		}
 	}
 
+	// Merge phase: merge completed branches back to base branch
+	if (!skipMerge && !dryRun && completedBranches.length > 0) {
+		await mergeCompletedBranches(
+			completedBranches,
+			originalBaseBranch,
+			engine,
+			workDir,
+			modelOverride
+		);
+	}
+
 	return result;
+}
+
+/**
+ * Merge completed branches back to the base branch
+ */
+async function mergeCompletedBranches(
+	branches: string[],
+	targetBranch: string,
+	engine: AIEngine,
+	workDir: string,
+	modelOverride?: string
+): Promise<void> {
+	if (branches.length === 0) {
+		return;
+	}
+
+	logInfo(`\nMerge phase: merging ${branches.length} branch(es) into ${targetBranch}`);
+
+	const merged: string[] = [];
+	const failed: string[] = [];
+
+	for (const branch of branches) {
+		logInfo(`Merging ${branch}...`);
+
+		const mergeResult = await mergeAgentBranch(branch, targetBranch, workDir);
+
+		if (mergeResult.success) {
+			logSuccess(`Merged ${branch}`);
+			merged.push(branch);
+		} else if (mergeResult.hasConflicts && mergeResult.conflictedFiles) {
+			// Try AI-assisted conflict resolution
+			logWarn(`Merge conflict in ${branch}, attempting AI resolution...`);
+
+			const resolved = await resolveConflictsWithAI(
+				engine,
+				mergeResult.conflictedFiles,
+				branch,
+				workDir,
+				modelOverride
+			);
+
+			if (resolved) {
+				logSuccess(`Resolved conflicts and merged ${branch}`);
+				merged.push(branch);
+			} else {
+				logError(`Failed to resolve conflicts for ${branch}`);
+				await abortMerge(workDir);
+				failed.push(branch);
+			}
+		} else {
+			logError(`Failed to merge ${branch}: ${mergeResult.error || "Unknown error"}`);
+			failed.push(branch);
+		}
+	}
+
+	// Delete successfully merged branches
+	for (const branch of merged) {
+		const deleted = await deleteLocalBranch(branch, workDir, true);
+		if (deleted) {
+			logDebug(`Deleted merged branch: ${branch}`);
+		}
+	}
+
+	// Summary
+	if (merged.length > 0) {
+		logSuccess(`Successfully merged ${merged.length} branch(es)`);
+	}
+	if (failed.length > 0) {
+		logWarn(`Failed to merge ${failed.length} branch(es): ${failed.join(", ")}`);
+		logInfo("These branches have been preserved for manual review.");
+	}
 }

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { loadConfig } from "../../config/loader.ts";
 import type { RuntimeOptions } from "../../config/types.ts";
 import { createEngine, isEngineAvailable } from "../../engines/index.ts";
 import type { AIEngineName } from "../../engines/types.ts";
@@ -6,6 +7,7 @@ import { isBrowserAvailable } from "../../execution/browser.ts";
 import { runParallel } from "../../execution/parallel.ts";
 import { type ExecutionResult, runSequential } from "../../execution/sequential.ts";
 import { getDefaultBaseBranch } from "../../git/branch.ts";
+import { sendNotifications } from "../../notifications/webhook.ts";
 import { createTaskSource } from "../../tasks/index.ts";
 import {
 	formatDuration,
@@ -151,6 +153,13 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 		console.log(`  Tokens:    ${formatTokens(result.totalInputTokens, result.totalOutputTokens)}`);
 	}
 	console.log("=".repeat(50));
+
+	// Send webhook notifications
+	const status = result.tasksFailed > 0 ? "failed" : "completed";
+	await sendNotifications(loadConfig(workDir), status, {
+		tasksCompleted: result.tasksCompleted,
+		tasksFailed: result.tasksFailed,
+	});
 
 	if (result.tasksCompleted > 0) {
 		notifyAllComplete(result.tasksCompleted);

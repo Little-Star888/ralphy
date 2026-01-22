@@ -11,6 +11,7 @@ import {
 	mergeAgentBranch,
 } from "../git/merge.ts";
 import { cleanupAgentWorktree, createAgentWorktree, getWorktreeBase } from "../git/worktree.ts";
+import { CachedTaskSource } from "../tasks/cached-task-source.ts";
 import type { Task, TaskSource } from "../tasks/types.ts";
 import { YamlTaskSource } from "../tasks/yaml.ts";
 import { logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
@@ -183,13 +184,25 @@ export async function runParallel(
 		let tasks: Task[] = [];
 
 		// For YAML sources, try to get tasks from the same parallel group
-		if (taskSource instanceof YamlTaskSource) {
+		// Support both direct YamlTaskSource and CachedTaskSource wrapping YamlTaskSource
+		const isYamlSource =
+			taskSource instanceof YamlTaskSource ||
+			(taskSource instanceof CachedTaskSource && taskSource.isYamlSource());
+
+		if (isYamlSource) {
 			const nextTask = await taskSource.getNextTask();
 			if (!nextTask) break;
 
-			const group = await taskSource.getParallelGroup(nextTask.title);
+			// Get parallel group - works for both direct and cached sources
+			const group =
+				taskSource instanceof CachedTaskSource
+					? await taskSource.getParallelGroup(nextTask.title)
+					: await (taskSource as YamlTaskSource).getParallelGroup(nextTask.title);
+
 			if (group > 0) {
-				tasks = await taskSource.getTasksInGroup(group);
+				tasks = taskSource.getTasksInGroup
+					? await taskSource.getTasksInGroup(group)
+					: [nextTask];
 			} else {
 				tasks = [nextTask];
 			}
@@ -238,7 +251,9 @@ export async function runParallel(
 
 		const results = await Promise.all(promises);
 
-		// Process results
+		// Process results and collect worktrees for parallel cleanup
+		const worktreesToCleanup: Array<{ worktreeDir: string; branchName: string }> = [];
+
 		for (const agentResult of results) {
 			const { task, worktreeDir, branchName, result: aiResult, error } = agentResult;
 
@@ -269,10 +284,26 @@ export async function runParallel(
 				notifyTaskFailed(task.title, errMsg);
 			}
 
-			// Cleanup worktree
+			// Collect worktree for cleanup (will be done in parallel below)
 			if (worktreeDir) {
-				const cleanup = await cleanupAgentWorktree(worktreeDir, branchName, workDir);
-				if (cleanup.leftInPlace) {
+				worktreesToCleanup.push({ worktreeDir, branchName });
+			}
+		}
+
+		// Cleanup all worktrees in parallel
+		if (worktreesToCleanup.length > 0) {
+			const cleanupResults = await Promise.all(
+				worktreesToCleanup.map(({ worktreeDir, branchName }) =>
+					cleanupAgentWorktree(worktreeDir, branchName, workDir).then((cleanup) => ({
+						worktreeDir,
+						leftInPlace: cleanup.leftInPlace,
+					})),
+				),
+			);
+
+			// Log any worktrees left in place
+			for (const { worktreeDir, leftInPlace } of cleanupResults) {
+				if (leftInPlace) {
 					logInfo(`Worktree left in place (uncommitted changes): ${worktreeDir}`);
 				}
 			}

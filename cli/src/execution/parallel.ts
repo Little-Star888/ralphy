@@ -194,10 +194,7 @@ export async function runParallel(
 			if (!nextTask) break;
 
 			// Get parallel group - works for both direct and cached sources
-			const group =
-				taskSource instanceof CachedTaskSource
-					? await taskSource.getParallelGroup(nextTask.title)
-					: await (taskSource as YamlTaskSource).getParallelGroup(nextTask.title);
+			const group = await taskSource.getParallelGroup(nextTask.title);
 
 			if (group > 0) {
 				tasks =

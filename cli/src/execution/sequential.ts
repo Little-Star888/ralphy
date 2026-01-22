@@ -31,6 +31,8 @@ export interface ExecutionOptions {
 	modelOverride?: string;
 	/** Skip automatic branch merging after parallel execution */
 	skipMerge?: boolean;
+	/** Additional arguments to pass to the engine CLI */
+	engineArgs?: string[];
 }
 
 export interface ExecutionResult {
@@ -62,6 +64,7 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 		browserEnabled,
 		activeSettings,
 		modelOverride,
+		engineArgs,
 	} = options;
 
 	const result: ExecutionResult = {
@@ -125,7 +128,10 @@ export async function runSequential(options: ExecutionOptions): Promise<Executio
 						spinner.updateStep("Working");
 
 						// Use streaming if available
-						const engineOptions = modelOverride ? { modelOverride } : undefined;
+						const engineOptions = {
+							...(modelOverride && { modelOverride }),
+							...(engineArgs && engineArgs.length > 0 && { engineArgs }),
+						};
 						if (engine.executeStreaming) {
 							return await engine.executeStreaming(
 								prompt,

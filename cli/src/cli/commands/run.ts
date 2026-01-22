@@ -120,6 +120,9 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			prdFile: options.prdFile,
 			prdIsFolder: options.prdIsFolder,
 			activeSettings,
+			modelOverride: options.modelOverride,
+			skipMerge: options.skipMerge,
+			engineArgs: options.engineArgs,
 		});
 	} else {
 		result = await runSequential({
@@ -139,6 +142,9 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			autoCommit: options.autoCommit,
 			browserEnabled: options.browserEnabled,
 			activeSettings,
+			modelOverride: options.modelOverride,
+			skipMerge: options.skipMerge,
+			engineArgs: options.engineArgs,
 		});
 	}
 

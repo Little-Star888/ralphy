@@ -2,6 +2,8 @@
 
 [![npm version](https://img.shields.io/npm/v/ralphy-cli.svg)](https://www.npmjs.com/package/ralphy-cli)
 
+**[Join our Discord](https://discord.gg/SZZV74mCuV)** - Questions? Want to contribute? Join the community!
+
 ![Ralphy](assets/ralphy.jpeg)
 
 Autonomous AI coding loop. Runs AI agents on tasks until done.
@@ -98,6 +100,23 @@ ralphy --sonnet "add feature"                          # shortcut for above
 ralphy --opencode --model opencode/glm-4.7-free "task" # custom OpenCode model
 ralphy --qwen --model qwen-max "build api"             # custom Qwen model
 ```
+
+### Engine-Specific Arguments
+
+Pass additional arguments to the underlying engine CLI using `--` separator:
+
+```bash
+# Pass copilot-specific arguments
+ralphy --copilot --model "claude-opus-4.5" --prd PRD.md -- --allow-all-tools --allow-all-urls --stream on
+
+# Pass claude-specific arguments  
+ralphy --claude "add feature" -- --no-permissions-prompt
+
+# Works with any engine
+ralphy --cursor "fix bug" -- --custom-arg value
+```
+
+Everything after `--` is passed directly to the engine CLI without interpretation.
 
 ## Task Sources
 
@@ -275,6 +294,9 @@ capabilities:
 ---
 
 ## Changelog
+
+### v4.4.0
+- GitHub Copilot CLI support (`--copilot`)
 
 ### v4.3.0
 - model override: `--model <name>` flag to override model for any engine

@@ -91,6 +91,8 @@ export interface RuntimeOptions {
 	modelOverride?: string;
 	/** Skip automatic branch merging after parallel execution */
 	skipMerge?: boolean;
+	/** Additional arguments to pass to the engine CLI */
+	engineArgs?: string[];
 }
 
 /**

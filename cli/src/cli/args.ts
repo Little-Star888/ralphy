@@ -53,7 +53,8 @@ export function createProgram(): Command {
       "--no-merge",
       "Skip automatic branch merging after parallel execution",
     )
-    .option("-v, --verbose", "Verbose output");
+    .option("-v, --verbose", "Verbose output")
+    .allowUnknownOption(); // Allow engine-specific arguments after --
 
   return program;
 }
@@ -68,8 +69,18 @@ export function parseArgs(args: string[]): {
   showConfig: boolean;
   addRule: string | undefined;
 } {
+  // Find the -- separator and extract engine-specific arguments
+  const separatorIndex = args.indexOf("--");
+  let engineArgs: string[] = [];
+  let ralphyArgs = args;
+
+  if (separatorIndex !== -1) {
+    engineArgs = args.slice(separatorIndex + 1);
+    ralphyArgs = args.slice(0, separatorIndex);
+  }
+
   const program = createProgram();
-  program.parse(args);
+  program.parse(ralphyArgs);
 
   const opts = program.opts();
   const [task] = program.args;
@@ -142,6 +153,7 @@ export function parseArgs(args: string[]): {
           : "auto",
     modelOverride,
     skipMerge: opts.merge === false,
+    engineArgs,
   };
 
   return {

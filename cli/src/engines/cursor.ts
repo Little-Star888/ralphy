@@ -19,6 +19,10 @@ export class CursorEngine extends BaseAIEngine {
 		if (options?.modelOverride) {
 			args.push("--model", options.modelOverride);
 		}
+		// Add any additional engine-specific arguments
+		if (options?.engineArgs && options.engineArgs.length > 0) {
+			args.push(...options.engineArgs);
+		}
 		args.push(prompt);
 
 		const { stdout, stderr, exitCode } = await execCommand(this.cliCommand, args, workDir);
@@ -92,6 +96,10 @@ export class CursorEngine extends BaseAIEngine {
 		const args = ["--print", "--force", "--output-format", "stream-json"];
 		if (options?.modelOverride) {
 			args.push("--model", options.modelOverride);
+		}
+		// Add any additional engine-specific arguments
+		if (options?.engineArgs && options.engineArgs.length > 0) {
+			args.push(...options.engineArgs);
 		}
 		args.push(prompt);
 

@@ -181,6 +181,7 @@ export class CachedTaskSource implements TaskSource {
 						logError(
 							`CachedTaskSource: Failed to flush after ${CachedTaskSource.MAX_FLUSH_RETRIES} retries: ${err}`,
 						);
+						this.flushRetryCount = 0;
 					}
 				});
 		}, this.flushIntervalMs);

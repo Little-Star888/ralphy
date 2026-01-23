@@ -53,7 +53,7 @@ Run with ralphy:
 ralphy
 
 # Or explicitly specify the file
-ralphy --md example-prd.md
+ralphy --prd example-prd.md
 ```
 
 ## Notes

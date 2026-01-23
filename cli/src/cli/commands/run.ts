@@ -9,6 +9,7 @@ import { type ExecutionResult, runSequential } from "../../execution/sequential.
 import { getDefaultBaseBranch } from "../../git/branch.ts";
 import { sendNotifications } from "../../notifications/webhook.ts";
 import { createTaskSource } from "../../tasks/index.ts";
+import { CachedTaskSource, createTaskSource } from "../../tasks/index.ts";
 import {
 	formatDuration,
 	formatTokens,
@@ -60,13 +61,15 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 		process.exit(1);
 	}
 
-	// Create task source
-	const taskSource = createTaskSource({
+	// Create task source with caching for better performance
+	// Caching reduces file I/O by loading tasks once and batching writes
+	const innerTaskSource = createTaskSource({
 		type: options.prdSource,
 		filePath: options.prdFile,
 		repo: options.githubRepo,
 		label: options.githubLabel,
 	});
+	const taskSource = new CachedTaskSource(innerTaskSource);
 
 	// Check if there are tasks
 	const remaining = await taskSource.countRemaining();
@@ -120,6 +123,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			prdFile: options.prdFile,
 			prdIsFolder: options.prdIsFolder,
 			activeSettings,
+			useSandbox: options.useSandbox,
 			modelOverride: options.modelOverride,
 			skipMerge: options.skipMerge,
 			engineArgs: options.engineArgs,
@@ -147,6 +151,10 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			engineArgs: options.engineArgs,
 		});
 	}
+
+	// Flush any pending task completions to disk and cleanup
+	await taskSource.flush();
+	taskSource.dispose();
 
 	// Summary
 	const duration = Date.now() - startTime;

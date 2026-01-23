@@ -122,6 +122,7 @@ interface ParallelPromptOptions {
 	skipTests?: boolean;
 	skipLint?: boolean;
 	browserEnabled?: "auto" | "true" | "false";
+	allowCommit?: boolean;
 }
 
 /**
@@ -134,6 +135,7 @@ export function buildParallelPrompt(options: ParallelPromptOptions): string {
 		skipTests = false,
 		skipLint = false,
 		browserEnabled = "auto",
+		allowCommit = true,
 	} = options;
 
 	// Parallel execution typically runs in a worktree; we still try to detect skills from CWD.
@@ -169,7 +171,11 @@ export function buildParallelPrompt(options: ParallelPromptOptions): string {
 
 	instructions.push(`${step}. Update ${progressFile} with what you did`);
 	step++;
-	instructions.push(`${step}. Commit your changes with a descriptive message`);
+	if (allowCommit) {
+		instructions.push(`${step}. Commit your changes with a descriptive message`);
+	} else {
+		instructions.push(`${step}. Do NOT run git commit; changes will be collected automatically`);
+	}
 
 	return `You are working on a specific task. Focus ONLY on this task:
 

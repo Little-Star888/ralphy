@@ -81,6 +81,14 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 	let baseBranch = options.baseBranch;
 	if ((options.branchPerTask || options.parallel || options.createPr) && !baseBranch) {
 		baseBranch = await getDefaultBaseBranch(workDir);
+
+		// Check if base branch is empty (unborn branch - no commits yet)
+		if (!baseBranch) {
+			logError("Cannot run in parallel/branch mode: repository has no commits yet.");
+			logInfo("Please make an initial commit first:");
+			logInfo('  git add . && git commit -m "Initial commit"');
+			process.exit(1);
+		}
 	}
 
 	logInfo(`Starting Ralphy with ${engine.name}`);
@@ -145,6 +153,7 @@ export async function runLoop(options: RuntimeOptions): Promise<void> {
 			autoCommit: options.autoCommit,
 			browserEnabled: options.browserEnabled,
 			activeSettings,
+			prdFile: options.prdFile,
 			modelOverride: options.modelOverride,
 			skipMerge: options.skipMerge,
 			engineArgs: options.engineArgs,

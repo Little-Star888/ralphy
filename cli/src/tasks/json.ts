@@ -28,7 +28,7 @@ export class JsonTaskSource implements TaskSource {
 	}
 
 	private writeFile(data: JsonTaskFile): void {
-		writeFileSync(this.filePath, JSON.stringify(data), "utf-8");
+		writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf-8");
 	}
 
 	async getAllTasks(): Promise<Task[]> {

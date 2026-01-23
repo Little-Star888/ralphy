@@ -1,17 +1,20 @@
 import {
 	BaseAIEngine,
 	checkForErrors,
-	detectStepFromOutput,
 	execCommand,
-	execCommandStreaming,
 	formatCommandError,
 } from "./base.ts";
-import type { AIResult, EngineOptions, ProgressCallback } from "./types.ts";
+import type { AIResult, EngineOptions } from "./types.ts";
 
 const isWindows = process.platform === "win32";
 
 /**
  * GitHub Copilot CLI AI Engine
+ * 
+ * Note: executeStreaming is intentionally not implemented for Copilot
+ * because the streaming function can hang on Windows due to how
+ * Bun handles cmd.exe stream completion. The non-streaming execute()
+ * method works reliably and Copilot provides its own --stream=on output.
  */
 export class CopilotEngine extends BaseAIEngine {
 	name = "GitHub Copilot";
@@ -179,76 +182,5 @@ export class CopilotEngine extends BaseAIEngine {
 		});
 
 		return meaningfulLines.join("\n") || "Task completed";
-	}
-
-	async executeStreaming(
-		prompt: string,
-		workDir: string,
-		onProgress: ProgressCallback,
-		options?: EngineOptions,
-	): Promise<AIResult> {
-		const { args } = this.buildArgs(prompt, options);
-
-		const outputLines: string[] = [];
-		const startTime = Date.now();
-
-		const { exitCode } = await execCommandStreaming(this.cliCommand, args, workDir, (line) => {
-			outputLines.push(line);
-
-			// Detect and report step changes
-			const step = detectStepFromOutput(line);
-			if (step) {
-				onProgress(step);
-			}
-		});
-
-		const durationMs = Date.now() - startTime;
-		const output = outputLines.join("\n");
-
-		// Check for JSON errors (from base)
-		const jsonError = checkForErrors(output);
-		if (jsonError) {
-			return {
-				success: false,
-				response: "",
-				inputTokens: 0,
-				outputTokens: 0,
-				error: jsonError,
-			};
-		}
-
-		// Check for Copilot-specific errors (plain text)
-		const copilotError = this.checkCopilotErrors(output);
-		if (copilotError) {
-			return {
-				success: false,
-				response: "",
-				inputTokens: 0,
-				outputTokens: 0,
-				error: copilotError,
-			};
-		}
-
-		// Parse Copilot output
-		const response = this.parseOutput(output);
-
-		// If command failed with non-zero exit code, provide a meaningful error
-		if (exitCode !== 0) {
-			return {
-				success: false,
-				response,
-				inputTokens: 0,
-				outputTokens: 0,
-				error: formatCommandError(exitCode, output),
-			};
-		}
-
-		return {
-			success: true,
-			response,
-			inputTokens: 0,
-			outputTokens: 0,
-			cost: durationMs > 0 ? `duration:${durationMs}` : undefined,
-		};
 	}
 }

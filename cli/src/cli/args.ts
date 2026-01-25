@@ -1,8 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { Command } from "commander";
 import type { RuntimeOptions } from "../config/types.ts";
-
-const VERSION = "4.3.0";
+import { VERSION } from "../version.ts";
 
 /**
  * Create the CLI program with all options

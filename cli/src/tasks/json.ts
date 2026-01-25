@@ -87,7 +87,6 @@ export class JsonTaskSource implements TaskSource {
 		}
 		return data.tasks.filter((task) => !task.completed).length;
 	}
-	}
 
 	async countCompleted(): Promise<number> {
 		const data = this.readFile();

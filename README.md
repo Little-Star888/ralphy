@@ -157,6 +157,24 @@ tasks:
     completed: false
 ```
 
+**JSON**:
+```bash
+ralphy --json PRD.json
+```
+```json
+{
+  "tasks": [
+    {
+      "title": "create auth",
+      "completed": false,
+      "parallel_group": 1,
+      "description": "Optional details"
+    }
+  ]
+}
+```
+Titles must be unique.
+
 **GitHub Issues**:
 ```bash
 ralphy --github owner/repo
@@ -279,6 +297,7 @@ ralphy --parallel --sandbox
 |------|--------------|
 | `--prd PATH` | task file or folder (auto-detected, default: PRD.md) |
 | `--yaml FILE` | YAML task file |
+| `--json FILE` | JSON task file |
 | `--github REPO` | use GitHub issues |
 | `--github-label TAG` | filter issues by label |
 | `--sync-issue N` | sync PRD progress to GitHub issue #N |

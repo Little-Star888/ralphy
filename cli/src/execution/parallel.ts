@@ -19,9 +19,7 @@ import {
 	createAgentWorktree,
 	getWorktreeBase,
 } from "../git/worktree.ts";
-import { CachedTaskSource } from "../tasks/cached-task-source.ts";
-import type { Task } from "../tasks/types.ts";
-import { YamlTaskSource } from "../tasks/yaml.ts";
+import type { Task, TaskSource } from "../tasks/types.ts";
 import { formatDuration, logDebug, logError, logInfo, logSuccess, logWarn } from "../ui/logger.ts";
 import { notifyTaskComplete, notifyTaskFailed } from "../ui/notify.ts";
 import { resolveConflictsWithAI } from "./conflict-resolution.ts";
@@ -82,7 +80,7 @@ async function runAgentInWorktree(
 		logDebug(`Agent ${agentNum}: Created worktree at ${worktreeDir}`);
 
 		// Copy PRD file or folder to worktree
-		if (prdSource === "markdown" || prdSource === "yaml") {
+		if (prdSource === "markdown" || prdSource === "yaml" || prdSource === "json") {
 			const srcPath = join(originalDir, prdFile);
 			const destPath = join(worktreeDir, prdFile);
 			if (existsSync(srcPath)) {
@@ -175,7 +173,7 @@ async function runAgentInSandbox(
 		);
 
 		// Copy PRD file or folder to sandbox (same as worktree mode)
-		if (prdSource === "markdown" || prdSource === "yaml") {
+		if (prdSource === "markdown" || prdSource === "yaml" || prdSource === "json") {
 			const srcPath = join(originalDir, prdFile);
 			const destPath = join(sandboxDir, prdFile);
 			if (existsSync(srcPath)) {
@@ -325,39 +323,32 @@ export async function runParallel(
 		// Get tasks for this batch
 		let tasks: Task[] = [];
 
-		// For YAML sources, try to get tasks from the same parallel group
-		// Support both direct YamlTaskSource and CachedTaskSource wrapping YamlTaskSource
-		const isYamlSource =
-			taskSource instanceof YamlTaskSource ||
-			(taskSource instanceof CachedTaskSource && taskSource.isYamlSource());
+		const taskSourceWithGroups = taskSource as TaskSource & {
+			getParallelGroup?: (title: string) => Promise<number>;
+			getTasksInGroup?: (group: number) => Promise<Task[]>;
+		};
 
-		if (isYamlSource) {
-			// In dry-run mode, find the first task not already processed
+		if (taskSourceWithGroups.getParallelGroup && taskSourceWithGroups.getTasksInGroup) {
 			let nextTask = await taskSource.getNextTask();
 			if (dryRun && nextTask && dryRunProcessedIds.has(nextTask.id)) {
 				const allTasks = await taskSource.getAllTasks();
-				nextTask = allTasks.find((t) => !dryRunProcessedIds.has(t.id)) || null;
+				nextTask = allTasks.find((task) => !dryRunProcessedIds.has(task.id)) || null;
 			}
 			if (!nextTask) break;
 
-			// Get parallel group - works for both direct and cached sources
-			const group = await taskSource.getParallelGroup(nextTask.title);
-
+			const group = await taskSourceWithGroups.getParallelGroup(nextTask.title);
 			if (group > 0) {
-				tasks = await taskSource.getTasksInGroup(group);
-				// Filter out already processed tasks in dry-run mode
+				tasks = await taskSourceWithGroups.getTasksInGroup(group);
 				if (dryRun) {
-					tasks = tasks.filter((t) => !dryRunProcessedIds.has(t.id));
+					tasks = tasks.filter((task) => !dryRunProcessedIds.has(task.id));
 				}
 			} else {
 				tasks = [nextTask];
 			}
 		} else {
-			// For other sources, get all remaining tasks
 			tasks = await taskSource.getAllTasks();
-			// Filter out already processed tasks in dry-run mode
 			if (dryRun) {
-				tasks = tasks.filter((t) => !dryRunProcessedIds.has(t.id));
+				tasks = tasks.filter((task) => !dryRunProcessedIds.has(task.id));
 			}
 		}
 

@@ -46,6 +46,7 @@ export function createProgram(): Command {
 		.option("--draft-pr", "Create PRs as draft")
 		.option("--prd <path>", "PRD file or folder (auto-detected)", "PRD.md")
 		.option("--yaml <file>", "YAML task file")
+		.option("--json <file>", "JSON task file")
 		.option("--github <repo>", "GitHub repo for issues (owner/repo)")
 		.option("--github-label <label>", "Filter GitHub issues by label")
 		.option("--sync-issue <number>", "Sync PRD file to GitHub issue body on each iteration")
@@ -102,11 +103,15 @@ export function parseArgs(args: string[]): {
 	const modelOverride = opts.sonnet ? "sonnet" : opts.model || undefined;
 
 	// Determine PRD source with auto-detection for file vs folder
-	let prdSource: "markdown" | "markdown-folder" | "yaml" | "github" = "markdown";
+	let prdSource: "markdown" | "markdown-folder" | "yaml" | "json" | "github" =
+		"markdown";
 	let prdFile = opts.prd || "PRD.md";
 	let prdIsFolder = false;
 
-	if (opts.yaml) {
+	if (opts.json) {
+		prdSource = "json";
+		prdFile = opts.json;
+	} else if (opts.yaml) {
 		prdSource = "yaml";
 		prdFile = opts.yaml;
 	} else if (opts.github) {
@@ -118,6 +123,8 @@ export function parseArgs(args: string[]): {
 			if (stat.isDirectory()) {
 				prdSource = "markdown-folder";
 				prdIsFolder = true;
+			} else if (prdFile.toLowerCase().endsWith(".json")) {
+				prdSource = "json";
 			}
 		}
 	}

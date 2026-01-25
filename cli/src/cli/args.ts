@@ -145,7 +145,7 @@ export function parseArgs(args: string[]): {
 		prdIsFolder,
 		githubRepo: opts.github || "",
 		githubLabel: opts.githubLabel || "",
-		syncIssue: opts.syncIssue ? Number.parseInt(opts.syncIssue, 10) : undefined,
+		syncIssue: opts.syncIssue ? (Number.parseInt(opts.syncIssue, 10) || undefined) : undefined,
 		autoCommit: opts.commit !== false,
 		browserEnabled: opts.browser === true ? "true" : opts.browser === false ? "false" : "auto",
 		modelOverride,

@@ -177,36 +177,38 @@ export class CopilotEngine extends BaseAIEngine {
 
 	/**
 	 * Check for Copilot-specific errors in output
-	 * Copilot CLI outputs plain text errors (not JSON) and may return exit code 0
+	 *
+	 * IMPORTANT: We are intentionally very conservative with error detection here.
+	 * We don't have documentation on Copilot CLI's error response formats, exit codes,
+	 * or error messages. The response content might contain strings like "network error",
+	 * "error:", "rate limit", etc. as part of valid output (e.g., test results, error
+	 * handling discussions, feedback about code). We only detect errors that we have
+	 * actually observed in practice.
+	 *
+	 * Currently known error: Authentication errors (observed when not logged in)
 	 */
 	private checkCopilotErrors(output: string): string | null {
-		const lower = output.toLowerCase();
 		const trimmed = output.trim();
+		const trimmedLower = trimmed.toLowerCase();
 
-		// Authentication errors
-		if (lower.includes("no authentication") || lower.includes("not authenticated")) {
+		// Authentication errors - the only error format we've actually observed
+		// When not authenticated, Copilot CLI outputs a message starting with these phrases
+		if (
+			trimmedLower.startsWith("no authentication") ||
+			trimmedLower.startsWith("not authenticated") ||
+			trimmedLower.startsWith("authentication required") ||
+			trimmedLower.startsWith("please authenticate")
+		) {
 			return "GitHub Copilot CLI is not authenticated. Run 'copilot' and use '/login' to authenticate, or set COPILOT_GITHUB_TOKEN environment variable.";
 		}
 
-		// Rate limiting
-		if (lower.includes("rate limit") || lower.includes("too many requests")) {
-			return "GitHub Copilot rate limit exceeded. Please wait and try again.";
-		}
-
-		// Network errors
-		if (lower.includes("network error") || lower.includes("connection refused")) {
-			return "Network error connecting to GitHub Copilot. Check your internet connection.";
-		}
-
-		// Generic error detection - check trimmed output and case-insensitive
-		if (trimmed.toLowerCase().startsWith("error:") || lower.includes("\nerror:")) {
-			// Extract the error message - capture until double-newline or end to support multi-line errors
-			const match = output.match(/error:\s*(.+?)(?:\n\n|$)/is);
-			if (match) {
-				return match[1].trim();
-			}
-			return "GitHub Copilot CLI returned an error";
-		}
+		// Note: We intentionally do NOT check for:
+		// - "rate limit" / "too many requests" - unknown format, could appear in response content
+		// - "network error" / "connection refused" - unknown format, could appear in response content
+		// - "error:" prefix - too generic, could appear in response content
+		// - Non-zero exit codes - we don't know if Copilot uses them for errors
+		//
+		// If we encounter other error patterns in practice, we can add them here.
 
 		return null;
 	}

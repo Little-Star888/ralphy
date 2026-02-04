@@ -163,37 +163,21 @@ export function extractAuthenticationError(output: string): string | null {
 		try {
 			const parsed = JSON.parse(line);
 
-			// Check error type with error/message fields
-			if (parsed.type === "error") {
-				const message = parsed.error?.message || parsed.message || "";
-				const messageLower = message.toLowerCase();
-
-				// Check for authentication-related keywords
-				if (isAuthenticationMessage(messageLower)) {
-					return message;
+			// Check if this is any kind of error response
+			if (parsed.type === "error" || parsed.is_error === true || parsed.error === "authentication_failed") {
+				// Extract message from content array (assistant type) or standard fields
+				let message = "";
+				const content = parsed.message?.content;
+				if (Array.isArray(content)) {
+					const textItem = content.find((item: { type?: string; text?: string }) => item.type === "text" && item.text);
+					if (textItem) message = textItem.text;
 				}
-			}
-
-			// Check result type with is_error flag
-			if (parsed.type === "result" && parsed.is_error === true) {
-				const message = parsed.result || parsed.error?.message || parsed.message || "";
-				const messageLower = message.toLowerCase();
-
-				if (isAuthenticationMessage(messageLower)) {
-					return message;
+				if (!message) {
+					message = parsed.result || parsed.error?.message || parsed.message || "";
 				}
-			}
 
-			// Check assistant type with authentication_failed error
-			if (parsed.type === "assistant" && parsed.error === "authentication_failed") {
-				const content = parsed.message?.content || [];
-				for (const item of content) {
-					if (item.type === "text" && item.text) {
-						const messageLower = item.text.toLowerCase();
-						if (isAuthenticationMessage(messageLower)) {
-							return item.text;
-						}
-					}
+				if (message && isAuthenticationMessage(message.toLowerCase())) {
+					return message;
 				}
 			}
 		} catch {

@@ -12,7 +12,46 @@ import {
 	utimesSync,
 } from "node:fs";
 import { dirname, join, sep } from "node:path";
-import { logDebug } from "../ui/logger.ts";
+import { logDebug, logWarn } from "../ui/logger.ts";
+
+/**
+ * Robustly remove a directory or file, retrying on EBUSY/EPERM errors.
+ * This is critical on Windows where file locks (e.g. anti-virus, indexing, open handles)
+ * frequently cause spurious cleanup failures.
+ *
+ * It attempts to delete 5 times with exponential backoff.
+ * If it ultimately fails, it LOGS A WARNING but DOES NOT CRASH.
+ * This prevents the entire runner from failing just because a temp folder is locked.
+ */
+export async function rmRF(path: string): Promise<void> {
+	if (!existsSync(path)) return;
+
+	let retries = 5;
+	for (let i = 0; i < retries; i++) {
+		try {
+			// Using force: true and recursive: true is standard
+			rmSync(path, { recursive: true, force: true });
+			return;
+		} catch (err: any) {
+			const isLockError = err.code === "EBUSY" || err.code === "EPERM" || err.code === "ENOTEMPTY";
+			
+			if (isLockError && i < retries - 1) {
+				// Wait with exponential backoff: 500, 1000, 2000, 4000...
+				const delay = 500 * Math.pow(2, i);
+				await new Promise((resolve) => setTimeout(resolve, delay));
+				continue;
+			}
+			
+			// On final failure for lock errors, log warning and swallow.
+			// For non-lock errors (any time), throw immediately.
+			if (isLockError && i === retries - 1) {
+				logWarn(`Failed to clean up ${path} after ${retries} attempts: ${err.message}. This may be due to a file lock. Proceeding anyway.`);
+			} else {
+				throw err; 
+			}
+		}
+	}
+}
 
 /**
  * Default directories to symlink (read-only dependencies).
@@ -113,9 +152,8 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 	let filesCopied = 0;
 
 	// Create sandbox directory
-	if (existsSync(sandboxDir)) {
-		rmSync(sandboxDir, { recursive: true, force: true });
-	}
+	// Robust cleanup of existing directory
+	await rmRF(sandboxDir);
 	mkdirSync(sandboxDir, { recursive: true });
 
 	try {
@@ -195,9 +233,7 @@ export async function createSandbox(options: SandboxOptions): Promise<SandboxRes
 		};
 	} catch (err) {
 		// Cleanup partial sandbox on failure
-		if (existsSync(sandboxDir)) {
-			rmSync(sandboxDir, { recursive: true, force: true });
-		}
+		await rmRF(sandboxDir);
 		throw err;
 	}
 }
@@ -321,9 +357,7 @@ export async function syncSandboxToOriginal(
  * Clean up a sandbox directory.
  */
 export async function cleanupSandbox(sandboxDir: string): Promise<void> {
-	if (existsSync(sandboxDir)) {
-		rmSync(sandboxDir, { recursive: true, force: true });
-	}
+	await rmRF(sandboxDir);
 }
 
 /**
